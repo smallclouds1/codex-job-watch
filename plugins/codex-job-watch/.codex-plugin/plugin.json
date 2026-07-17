@@ -1,10 +1,15 @@
 {
   "name": "codex-job-watch",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Durable Windows jobs with silent foreground waiting and background completion messages.",
   "author": {
-    "name": "smallclouds1"
+    "name": "smallclouds1",
+    "url": "https://github.com/smallclouds1"
   },
+  "homepage": "https://github.com/smallclouds1/codex-job-watch",
+  "repository": "https://github.com/smallclouds1/codex-job-watch",
+  "license": "MIT",
+  "keywords": ["codex", "windows", "long-running-jobs", "background-notification"],
   "skills": "./skills/",
   "interface": {
     "displayName": "Codex Job Watch",
