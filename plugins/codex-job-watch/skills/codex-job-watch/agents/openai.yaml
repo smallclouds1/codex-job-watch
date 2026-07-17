@@ -1,0 +1,7 @@
+interface:
+  display_name: "Codex Job Watch"
+  short_description: "Durable Windows jobs with completion messages"
+  default_prompt: "Use $codex-job-watch to run this long Windows command and choose the appropriate wait mode."
+
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,20 @@
+{
+  "name": "smallclouds1-tools",
+  "interface": {
+    "displayName": "smallclouds1 Codex Tools"
+  },
+  "plugins": [
+    {
+      "name": "codex-job-watch",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex-job-watch"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

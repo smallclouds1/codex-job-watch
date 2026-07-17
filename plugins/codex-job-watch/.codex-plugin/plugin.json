@@ -1,0 +1,18 @@
+{
+  "name": "codex-job-watch",
+  "version": "0.1.0",
+  "description": "Durable Windows jobs with silent foreground waiting and background completion messages.",
+  "author": {
+    "name": "smallclouds1"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex Job Watch",
+    "shortDescription": "Run durable jobs and receive completion messages.",
+    "longDescription": "Runs long Windows commands with durable state, logs and cancellation. Choose a silent foreground wait or a detached job that reports completion to the originating Codex task without heartbeat polling.",
+    "developerName": "smallclouds1",
+    "category": "Productivity",
+    "capabilities": ["durable Windows jobs", "silent waiting", "background completion notification"],
+    "defaultPrompt": "Use $codex-job-watch to run this long Windows command and choose the appropriate wait mode."
+  }
+}

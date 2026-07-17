@@ -1,0 +1,5 @@
+.test-runtime/
+.validator-deps/
+_task/jobs/
+*.tmp.*
+*.bak.*
