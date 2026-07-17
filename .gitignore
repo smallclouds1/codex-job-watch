@@ -1,4 +1,5 @@
 .test-runtime/
+.notification-test/
 .validator-deps/
 _task/jobs/
 *.tmp.*
