@@ -221,7 +221,24 @@ function Stop-ProcessTree {
     if ($env:OS -eq "Windows_NT") {
         $taskkill = Join-Path $env:SystemRoot "System32\taskkill.exe"
         if (Test-Path -LiteralPath $taskkill -PathType Leaf) {
-            & $taskkill /PID $ProcessId /T /F 2>$null | Out-Null
+            # Cancellation can race with the worker's own exit path. Invoke
+            # taskkill with redirected native streams so an already-exited PID
+            # cannot surface as a PowerShell NativeCommandError to callers.
+            $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = $taskkill
+            $startInfo.Arguments = "/PID $ProcessId /T /F"
+            $startInfo.UseShellExecute = $false
+            $startInfo.CreateNoWindow = $true
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            $killer = [System.Diagnostics.Process]::Start($startInfo)
+            try {
+                $null = $killer.StandardOutput.ReadToEnd()
+                $null = $killer.StandardError.ReadToEnd()
+                $killer.WaitForExit()
+            } finally {
+                $killer.Dispose()
+            }
             if (!(Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) {
                 return
             }
