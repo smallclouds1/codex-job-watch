@@ -11,7 +11,14 @@ The PowerShell runner keeps atomic state, stdout/stderr logs, terminal results, 
 
 ## Install
 
-Clone this repository, then add its local marketplace and plugin:
+Install directly from GitHub:
+
+```powershell
+codex plugin marketplace add smallclouds1/codex-job-watch
+codex plugin add codex-job-watch@smallclouds1-tools
+```
+
+For local development, clone the repository and add the checkout instead:
 
 ```powershell
 codex plugin marketplace add <path-to-this-repository>
