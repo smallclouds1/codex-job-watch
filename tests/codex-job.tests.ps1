@@ -75,6 +75,20 @@ try {
     Assert-True ($failureResult.status -eq "failed") "external nonzero exit was reported as succeeded"
     Assert-True ([int]$failureResult.exit_code -eq 7) "external exit code was not preserved"
 
+    $parserFailureStartRaw = Invoke-CodexJobProcess -ToolArgs @(
+        "start", "-Root", $runRoot, "-Name", "regression-parser-failure",
+        "-Command", "if ("
+    )
+    $parserFailureStart = $parserFailureStartRaw.Text | ConvertFrom-Json
+    $parserFailureWaitRaw = Invoke-CodexJobProcess -ToolArgs @(
+        "wait", "-Root", $runRoot, "-Job", $parserFailureStart.job_dir, "-TimeoutSec", "20"
+    ) -ExpectedExitCodes @(1)
+    $parserFailureResult = $parserFailureWaitRaw.Text | ConvertFrom-Json
+    Assert-True ($parserFailureResult.status -eq "failed") "PowerShell parser failure was reported as succeeded"
+    Assert-True ([int]$parserFailureResult.exit_code -eq 1) "PowerShell parser failure did not fail closed"
+    Assert-True ($parserFailureResult.error -like "command did not write its authoritative exit-code file*") "PowerShell parser failure did not expose the missing exit-code error"
+    Assert-True (!(Test-Path -LiteralPath (Join-Path $parserFailureStart.job_dir "command.exitcode"))) "parser failure unexpectedly wrote command.exitcode"
+
     $notificationStatusRaw = Invoke-CodexJobProcess -ToolArgs @(
         "notification-status", "-Root", $runRoot, "-Job", $successStart.job_dir
     )
@@ -125,6 +139,8 @@ try {
         success_job = $successStart.job_id
         failed_job = $failureStart.job_id
         failed_exit_code = [int]$failureResult.exit_code
+        parser_failure_job = $parserFailureStart.job_id
+        parser_failure_exit_code = [int]$parserFailureResult.exit_code
         cancel_job = $cancelStart.job_id
         state_parse_failures = $parseFailures
         cancelled_child_pid = $childPid

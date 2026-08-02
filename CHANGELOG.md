@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2 - 2026-08-02
+
+- Fail closed when a generated PowerShell command exits before writing its authoritative `command.exitcode` file.
+- Report the missing exit-code condition in both persisted state and terminal results.
+- Add a regression test for PowerShell parser failures that previously risked a false-success result.
+
 ## 0.1.1 - 2026-07-17
 
 - Add complete English, Simplified Chinese, Traditional Chinese, Japanese, and Korean usage guides.
