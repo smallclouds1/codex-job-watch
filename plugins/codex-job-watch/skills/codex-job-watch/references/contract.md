@@ -22,6 +22,8 @@ Each run lives under `<root>/_task/jobs/<timestamp-name>/`. Important files:
 
 Wait exits: `0` succeeded, `1` failed, `124` wait timeout, `130` cancelled.
 
+PowerShell jobs fail closed when the generated command script does not write its authoritative `command.exitcode` file. This covers parser/startup failures that occur before the script trap can run and prevents redirected `Start-Process` from reporting a stale zero as success.
+
 ## Durability boundary
 
 The Windows worker and its logs survive the originating Codex tool call. In `background-notify`, notification depends on a separate Codex task remaining runnable. A full app shutdown does not stop the OS job, but the waiter may need to be resumed after the app returns.

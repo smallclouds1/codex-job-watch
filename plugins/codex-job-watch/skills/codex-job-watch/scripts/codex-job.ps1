@@ -418,6 +418,7 @@ function Start-Worker {
         $child.Refresh()
         $exitCode = [int]$child.ExitCode
         $commandExitCodeFile = Join-Path $JobDir "command.exitcode"
+        $commandExitCodeMissing = $false
         if (Test-Path -LiteralPath $commandExitCodeFile -PathType Leaf) {
             $commandExitCodeText = (Get-Content -Raw -Encoding UTF8 -LiteralPath $commandExitCodeFile).Trim()
             $parsedCommandExitCode = 0
@@ -426,6 +427,13 @@ function Start-Worker {
             } else {
                 throw "Command exit-code file is invalid: $commandExitCodeFile"
             }
+        } else {
+            # A PowerShell parser error happens before the generated script's trap
+            # can run. Start-Process may still expose a stale zero ExitCode when
+            # streams are redirected, so absence of the authoritative file must
+            # fail closed instead of producing a false success.
+            $commandExitCodeMissing = $true
+            $exitCode = 1
         }
         $wasCancelled = Test-Path -LiteralPath $state.cancel_path -PathType Leaf
         $finalStatus = if ($wasCancelled) { "cancelled" } elseif ($exitCode -eq 0) { "succeeded" } else { "failed" }
@@ -437,6 +445,8 @@ function Start-Worker {
         if ($wasCancelled) {
             Set-ObjectProperty -Object $state -Name "exit_code" -Value 130
             Set-ObjectProperty -Object $state -Name "error" -Value "cancel requested"
+        } elseif ($commandExitCodeMissing) {
+            Set-ObjectProperty -Object $state -Name "error" -Value "command did not write its authoritative exit-code file; inspect worker logs for a parser or startup failure"
         } elseif ($exitCode -ne 0) {
             Set-ObjectProperty -Object $state -Name "error" -Value "command exited with code $exitCode"
         }
@@ -445,6 +455,7 @@ function Start-Worker {
             status = $finalStatus
             job_id = $state.job_id
             exit_code = $(if ($wasCancelled) { 130 } else { $exitCode })
+            error = $state.error
             log_path = $state.log_path
             stderr_path = $state.stderr_path
             state_path = $state.state_path

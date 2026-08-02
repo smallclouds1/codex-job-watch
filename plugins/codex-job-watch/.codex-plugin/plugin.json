@@ -1,6 +1,6 @@
 {
   "name": "codex-job-watch",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Durable Windows jobs with silent foreground waiting and background completion messages.",
   "author": {
     "name": "smallclouds1",
