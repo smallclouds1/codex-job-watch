@@ -9,9 +9,11 @@ Use the bundled `scripts/codex-job.ps1`. Keep each invocation scoped to the user
 
 ## Choose a mode
 
-- `foreground-wait`: use when the user wants the current Codex task visibly busy until the command finishes. Run the `run` action in one blocking tool call. While it is running, do not narrate, inspect other files, or switch tasks. Return only after terminal state.
-- `background-notify`: use when the user wants the current Codex task released immediately and a completion message later. Start the job, create one dedicated background Codex task to wait, then return. Do not use heartbeat or recurring automation.
+- `background-notify` is the default when runtime may exceed 60 seconds or is unknown. Start the job, create one dedicated background Codex task to wait, then return. Do not use heartbeat or recurring automation.
+- `foreground-wait` is only for commands expected to finish inside one uninterrupted tool call, normally within 60 seconds, or when the user explicitly requests this mode. Run the `run` action in one blocking tool call. While it is running, do not narrate, inspect other files, or switch tasks. Return only after terminal state.
 - Plain `start`: use only when the user wants a detached job and will check it manually.
+
+The only user-visible messages for a long job are one launch acknowledgement and one terminal completion message. Never send elapsed-time or no-result updates such as “still running”, “waiting for several minutes”, “continuing to wait”, or “no response yet”. A tool yield, resumable cell ID, empty output, or unchanged state is not a reportable event.
 
 ## Foreground wait
 
@@ -21,7 +23,7 @@ Run:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File <skill>/scripts/codex-job.ps1 run -Root <project-root> -Cwd <working-directory> -Name <name> -Command <command>
 ```
 
-The tool call itself is the wait. Do not issue commentary while blocked. A successful terminal result exits 0; failed, cancelled, and timed-out waits use nonzero exit codes and emit JSON.
+The tool call itself is the wait. Do not issue commentary while blocked. If the host returns a resumable wait handle before terminal state, resume that handle without commentary; do not turn each yield into a progress update. If repeated yielding is likely, use `background-notify` instead. A successful terminal result exits 0; failed, cancelled, and timed-out waits use nonzero exit codes and emit JSON.
 
 ## Background notify
 
@@ -35,7 +37,7 @@ The tool call itself is the wait. Do not issue commentary while blocked. A succe
    - after a successful send, call `mark-notified -Job <job_dir> -ThreadId <origin-id>`;
    - archive its own task;
    - perform no other work and provide no progress narration.
-5. Tell the user the job was detached and notification is armed. Do not wait in the originating task.
+5. Tell the user once that the job was detached and notification is armed. Do not wait or post progress updates in the originating task.
 
 If task-creation or task-messaging tools are unavailable, say that automatic in-chat notification is unavailable and fall back to plain `start`; do not fake it with heartbeat polling.
 

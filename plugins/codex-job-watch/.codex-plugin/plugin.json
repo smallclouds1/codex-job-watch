@@ -1,6 +1,6 @@
 {
   "name": "codex-job-watch",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Durable Windows jobs with silent foreground waiting and background completion messages.",
   "author": {
     "name": "smallclouds1",
@@ -18,6 +18,6 @@
     "developerName": "smallclouds1",
     "category": "Productivity",
     "capabilities": ["durable Windows jobs", "silent waiting", "background completion notification"],
-    "defaultPrompt": "Use $codex-job-watch to run this long Windows command and choose the appropriate wait mode."
+    "defaultPrompt": "Use $codex-job-watch to run this Windows command. Default unknown or over-60-second runtimes to background-notify, and never narrate elapsed waiting or unchanged status."
   }
 }

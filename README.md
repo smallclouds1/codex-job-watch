@@ -54,7 +54,7 @@ Use $codex-job-watch to run this export in background-notify mode.
 Return this task now and post one message here when the job finishes.
 ```
 
-If you do not specify a mode, Codex should choose foreground wait when your next step depends on the result, and background notify when the work can safely continue independently.
+If you do not specify a mode, Codex defaults to background notify when runtime may exceed 60 seconds or is unknown. Foreground wait is reserved for commands expected to finish inside one uninterrupted tool call, normally within 60 seconds, or when you explicitly request it. Long jobs produce only one launch acknowledgement and one terminal completion message; tool yields and unchanged status are never narrated.
 
 ## Direct PowerShell runner
 
