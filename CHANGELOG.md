@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3 - 2026-08-14
+
+- Default unknown or longer-than-60-second commands to background notification instead of foreground waiting.
+- Prohibit elapsed-time, unchanged-state, and repeated “still running” narration.
+- Clarify that resumable tool yields must be continued silently and are not user-visible progress events.
+
 ## 0.1.2 - 2026-08-02
 
 - Fail closed when a generated PowerShell command exits before writing its authoritative `command.exitcode` file.
