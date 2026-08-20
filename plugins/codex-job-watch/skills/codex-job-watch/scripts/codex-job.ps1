@@ -1,6 +1,6 @@
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("run", "start", "wait", "status", "list", "cancel", "wait-path", "notification-status", "mark-notified", "run-worker")]
+    [ValidateSet("run", "start", "wait", "status", "list", "cancel", "wait-path", "notification-status", "mark-notified", "arm-waiter", "finalization-status", "run-worker")]
     [string]$Action = "status",
 
     [string]$Name,
@@ -11,6 +11,7 @@ param(
     [string]$WatchPath,
     [string]$Pattern = "*",
     [string]$ThreadId,
+    [string]$WaiterThreadId,
     [string]$MessageId,
 
     [ValidateSet("powershell", "cmd")]
@@ -362,6 +363,8 @@ exit `$__codexJobExitCode
         job_dir = $jobDir
         state_path = (Join-Path $jobDir "STATE.json")
         wait_command = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" wait -Job `"$jobDir`""
+        finalization_gate_required = $true
+        finalization_gate_action = "finalization-status"
     }
 }
 
@@ -816,6 +819,113 @@ function Get-NotificationPath {
     return (Join-Path $JobDir "notification.sent.json")
 }
 
+function Get-WaiterArmPath {
+    param([string]$JobDir)
+    return (Join-Path $JobDir "waiter.armed.json")
+}
+
+function Set-WaiterArm {
+    param([string]$JobDir, [string]$OriginThreadId, [string]$OwnerWaiterThreadId)
+    if ([string]::IsNullOrWhiteSpace($OriginThreadId)) { throw "Missing -ThreadId for the originating task." }
+    if ([string]::IsNullOrWhiteSpace($OwnerWaiterThreadId)) { throw "Missing -WaiterThreadId." }
+    if ($OriginThreadId -eq $OwnerWaiterThreadId) { throw "Origin and waiter task IDs must be different." }
+
+    $mutex = Enter-StateMutex -JobDir $JobDir
+    try {
+        $state = Read-JsonFile -Path (Get-StatePath -JobDir $JobDir)
+        if (@("succeeded", "failed", "cancelled") -contains $state.status) {
+            ([ordered]@{
+                status = "job_already_terminal"
+                job_id = $state.job_id
+                job_status = $state.status
+                finalizable = $true
+            } | ConvertTo-Json -Depth 20 -Compress)
+            return
+        }
+
+        $path = Get-WaiterArmPath -JobDir $JobDir
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $existing = Read-JsonFile -Path $path
+            if ($existing.origin_thread_id -ne $OriginThreadId -or $existing.waiter_thread_id -ne $OwnerWaiterThreadId) {
+                throw "Job already has a different waiter owner: $($existing.waiter_thread_id)"
+            }
+            ([ordered]@{
+                status = "already_armed"
+                job_id = $existing.job_id
+                origin_thread_id = $existing.origin_thread_id
+                waiter_thread_id = $existing.waiter_thread_id
+                armed_at = $existing.armed_at
+                waiter_arm_path = $path
+            } | ConvertTo-Json -Depth 20 -Compress)
+            return
+        }
+
+        $record = [ordered]@{
+            schema = 1
+            status = "armed"
+            job_id = $state.job_id
+            job_status_at_arm = $state.status
+            origin_thread_id = $OriginThreadId
+            waiter_thread_id = $OwnerWaiterThreadId
+            armed_at = Get-UtcIso
+            waiter_arm_path = $path
+        }
+        Write-JsonFile -Path $path -Object $record
+        $record | ConvertTo-Json -Depth 20 -Compress
+    } finally {
+        Exit-StateMutex -Mutex $mutex
+    }
+}
+
+function Show-FinalizationStatus {
+    param([string]$JobDir, [string]$OriginThreadId)
+    if ([string]::IsNullOrWhiteSpace($OriginThreadId)) { throw "Missing -ThreadId for the originating task." }
+
+    $state = Read-State -JobDir $JobDir
+    if (@("succeeded", "failed", "cancelled") -contains $state.status) {
+        ([ordered]@{
+            status = "terminal"
+            finalizable = $true
+            ownership_mode = "terminal"
+            job_id = $state.job_id
+            job_status = $state.status
+        } | ConvertTo-Json -Depth 20 -Compress)
+        exit 0
+    }
+
+    $path = Get-WaiterArmPath -JobDir $JobDir
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        $record = Read-JsonFile -Path $path
+        if ($record.job_id -eq $state.job_id -and
+            $record.origin_thread_id -eq $OriginThreadId -and
+            ![string]::IsNullOrWhiteSpace([string]$record.waiter_thread_id)) {
+            ([ordered]@{
+                status = "background_waiter_armed"
+                finalizable = $true
+                ownership_mode = "background_waiter"
+                job_id = $state.job_id
+                job_status = $state.status
+                origin_thread_id = $record.origin_thread_id
+                waiter_thread_id = $record.waiter_thread_id
+                waiter_arm_path = $path
+            } | ConvertTo-Json -Depth 20 -Compress)
+            exit 0
+        }
+    }
+
+    ([ordered]@{
+        status = "unowned_running_job"
+        finalizable = $false
+        ownership_mode = "none"
+        job_id = $state.job_id
+        job_status = $state.status
+        origin_thread_id = $OriginThreadId
+        required_action = "Block on wait/run/wait-path, or create one separate waiter task and call arm-waiter. Do not final."
+        waiter_arm_path = $path
+    } | ConvertTo-Json -Depth 20 -Compress)
+    exit 23
+}
+
 function Show-NotificationStatus {
     param([string]$JobDir)
     $path = Get-NotificationPath -JobDir $JobDir
@@ -906,6 +1016,14 @@ switch ($Action) {
     "mark-notified" {
         $jobDir = Resolve-JobDir -ProjectRoot $projectRoot -JobValue $Job
         Mark-NotificationSent -JobDir $jobDir -TargetThreadId $ThreadId -SentMessageId $MessageId
+    }
+    "arm-waiter" {
+        $jobDir = Resolve-JobDir -ProjectRoot $projectRoot -JobValue $Job
+        Set-WaiterArm -JobDir $jobDir -OriginThreadId $ThreadId -OwnerWaiterThreadId $WaiterThreadId
+    }
+    "finalization-status" {
+        $jobDir = Resolve-JobDir -ProjectRoot $projectRoot -JobValue $Job
+        Show-FinalizationStatus -JobDir $jobDir -OriginThreadId $ThreadId
     }
     "run-worker" {
         if ([string]::IsNullOrWhiteSpace($Job)) { throw "Missing worker -Job." }

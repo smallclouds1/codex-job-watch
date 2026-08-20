@@ -63,6 +63,61 @@ try {
     Assert-True ($successResult.status -eq "succeeded") "success job did not reach succeeded"
     Assert-True ($parseFailures -eq 0) "STATE.json became unreadable during concurrent updates"
 
+    $ownershipStartRaw = Invoke-CodexJobProcess -ToolArgs @(
+        "start", "-Root", $runRoot, "-Name", "regression-waiter-ownership",
+        "-Command", "Start-Sleep -Seconds 8; Write-Output 'owned'"
+    )
+    $ownershipStart = $ownershipStartRaw.Text | ConvertFrom-Json
+    Assert-True ($ownershipStart.finalization_gate_required -eq $true) "start did not advertise the finalization gate"
+    $unownedGateRaw = Invoke-CodexJobProcess -ToolArgs @(
+        "finalization-status", "-Root", $runRoot, "-Job", $ownershipStart.job_dir,
+        "-ThreadId", "origin-regression-thread"
+    ) -ExpectedExitCodes @(23)
+    $unownedGate = $unownedGateRaw.Text | ConvertFrom-Json
+    Assert-True ($unownedGate.status -eq "unowned_running_job") "unowned running job was not rejected"
+    Assert-True ($unownedGate.finalizable -eq $false) "unowned running job was incorrectly finalizable"
+
+    $armRaw = Invoke-CodexJobProcess -ToolArgs @(
+        "arm-waiter", "-Root", $runRoot, "-Job", $ownershipStart.job_dir,
+        "-ThreadId", "origin-regression-thread", "-WaiterThreadId", "waiter-regression-thread"
+    )
+    $arm = $armRaw.Text | ConvertFrom-Json
+    Assert-True ($arm.status -eq "armed") "background waiter could not be armed"
+    $armedGateRaw = Invoke-CodexJobProcess -ToolArgs @(
+        "finalization-status", "-Root", $runRoot, "-Job", $ownershipStart.job_dir,
+        "-ThreadId", "origin-regression-thread"
+    )
+    $armedGate = $armedGateRaw.Text | ConvertFrom-Json
+    Assert-True ($armedGate.status -eq "background_waiter_armed") "armed waiter did not satisfy finalization gate"
+    Assert-True ($armedGate.waiter_thread_id -eq "waiter-regression-thread") "wrong waiter owned the job"
+    $wrongOriginGateRaw = Invoke-CodexJobProcess -ToolArgs @(
+        "finalization-status", "-Root", $runRoot, "-Job", $ownershipStart.job_dir,
+        "-ThreadId", "different-origin-thread"
+    ) -ExpectedExitCodes @(23)
+    $wrongOriginGate = $wrongOriginGateRaw.Text | ConvertFrom-Json
+    Assert-True ($wrongOriginGate.status -eq "unowned_running_job") "a different origin task could reuse the waiter arm"
+    $conflictingArmFailed = $false
+    try {
+        $null = Invoke-CodexJobProcess -ToolArgs @(
+            "arm-waiter", "-Root", $runRoot, "-Job", $ownershipStart.job_dir,
+            "-ThreadId", "origin-regression-thread", "-WaiterThreadId", "different-waiter-thread"
+        )
+    } catch {
+        $conflictingArmFailed = $true
+    }
+    Assert-True $conflictingArmFailed "a second waiter replaced the registered owner"
+    $ownershipWaitRaw = Invoke-CodexJobProcess -ToolArgs @(
+        "wait", "-Root", $runRoot, "-Job", $ownershipStart.job_dir, "-TimeoutSec", "20"
+    )
+    $ownershipResult = $ownershipWaitRaw.Text | ConvertFrom-Json
+    Assert-True ($ownershipResult.status -eq "succeeded") "waiter ownership job did not finish"
+    $terminalGateRaw = Invoke-CodexJobProcess -ToolArgs @(
+        "finalization-status", "-Root", $runRoot, "-Job", $ownershipStart.job_dir,
+        "-ThreadId", "different-origin-thread"
+    )
+    $terminalGate = $terminalGateRaw.Text | ConvertFrom-Json
+    Assert-True ($terminalGate.status -eq "terminal") "terminal job did not pass finalization gate"
+
     $failureStartRaw = Invoke-CodexJobProcess -ToolArgs @(
         "start", "-Root", $runRoot, "-Name", "regression-external-exit-code",
         "-Command", "cmd.exe /d /c exit 7"
@@ -142,6 +197,8 @@ try {
         parser_failure_job = $parserFailureStart.job_id
         parser_failure_exit_code = [int]$parserFailureResult.exit_code
         cancel_job = $cancelStart.job_id
+        ownership_job = $ownershipStart.job_id
+        unowned_gate_exit_code = $unownedGateRaw.ExitCode
         state_parse_failures = $parseFailures
         cancelled_child_pid = $childPid
         test_root = $runRoot
