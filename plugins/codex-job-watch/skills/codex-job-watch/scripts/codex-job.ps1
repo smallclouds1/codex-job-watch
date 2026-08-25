@@ -96,6 +96,13 @@ function Set-ObjectProperty {
     }
 }
 
+function Get-ObjectPropertyValue {
+    param([object]$Object, [string]$Name)
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
 function ConvertTo-Slug {
     param([string]$Text)
     if ([string]::IsNullOrWhiteSpace($Text)) {
@@ -594,17 +601,22 @@ function List-Jobs {
 function Cancel-Job {
     param([string]$JobDir)
     $state = Read-State -JobDir $JobDir
-    Write-TextFile -Path $state.cancel_path -Text ("cancel requested at " + (Get-UtcIso))
-    if ($state.child_pid -ne $null) {
-        Stop-ProcessTree -ProcessId ([int]$state.child_pid)
+    $cancelPath = Get-ObjectPropertyValue -Object $state -Name "cancel_path"
+    if (![string]::IsNullOrWhiteSpace([string]$cancelPath)) {
+        Write-TextFile -Path $cancelPath -Text ("cancel requested at " + (Get-UtcIso))
     }
-    if ($state.worker_pid -ne $null) {
+    $childPid = Get-ObjectPropertyValue -Object $state -Name "child_pid"
+    if ($childPid -ne $null) {
+        Stop-ProcessTree -ProcessId ([int]$childPid)
+    }
+    $workerPid = Get-ObjectPropertyValue -Object $state -Name "worker_pid"
+    if ($workerPid -ne $null) {
         $deadline = (Get-Date).AddSeconds(3)
-        while ((Get-Date) -lt $deadline -and (Get-Process -Id ([int]$state.worker_pid) -ErrorAction SilentlyContinue)) {
+        while ((Get-Date) -lt $deadline -and (Get-Process -Id ([int]$workerPid) -ErrorAction SilentlyContinue)) {
             Start-Sleep -Milliseconds 200
         }
-        if (Get-Process -Id ([int]$state.worker_pid) -ErrorAction SilentlyContinue) {
-            Stop-Process -Id ([int]$state.worker_pid) -Force -ErrorAction SilentlyContinue
+        if (Get-Process -Id ([int]$workerPid) -ErrorAction SilentlyContinue) {
+            Stop-Process -Id ([int]$workerPid) -Force -ErrorAction SilentlyContinue
         }
     }
     $state = Read-State -JobDir $JobDir
@@ -615,16 +627,19 @@ function Cancel-Job {
         Set-ObjectProperty -Object $state -Name "exit_code" -Value 130
         Set-ObjectProperty -Object $state -Name "error" -Value "cancel requested"
         Save-State -JobDir $JobDir -State $state
-        Write-JsonFile -Path $state.result_path -Object ([ordered]@{
+        $result = [ordered]@{
             status = "cancelled"
             job_id = $state.job_id
             exit_code = 130
             error = "cancel requested"
             state_path = $state.state_path
-            log_path = $state.log_path
-            stderr_path = $state.stderr_path
             finished_at = $state.finished_at
-        })
+        }
+        $logPath = Get-ObjectPropertyValue -Object $state -Name "log_path"
+        $stderrPath = Get-ObjectPropertyValue -Object $state -Name "stderr_path"
+        if ($logPath -ne $null) { $result["log_path"] = $logPath }
+        if ($stderrPath -ne $null) { $result["stderr_path"] = $stderrPath }
+        Write-JsonFile -Path $state.result_path -Object $result
     }
     ([ordered]@{
         status = "cancel_requested"
@@ -695,6 +710,8 @@ function New-WatchState {
         job_dir = $jobDir
         state_path = (Join-Path $jobDir "STATE.json")
         result_path = (Join-Path $jobDir "result.json")
+        cancel_path = (Join-Path $jobDir "cancel.flag")
+        worker_pid = $PID
         watch_path = $ResolvedWatchPath
         pattern = $Pattern
         recurse = [bool]$Recurse
@@ -738,6 +755,26 @@ function Wait-PathArtifact {
     $lastStateWrite = Get-Date
 
     while ($true) {
+        if (Test-Path -LiteralPath $state.cancel_path -PathType Leaf) {
+            $state = Read-State -JobDir $state.job_dir
+            Set-ObjectProperty -Object $state -Name "status" -Value "cancelled"
+            Set-ObjectProperty -Object $state -Name "step" -Value "cancelled"
+            Set-ObjectProperty -Object $state -Name "error" -Value "cancel requested"
+            Set-ObjectProperty -Object $state -Name "finished_at" -Value (Get-UtcIso)
+            Save-State -JobDir $state.job_dir -State $state
+            $result = [ordered]@{
+                status = "cancelled"
+                job_id = $state.job_id
+                exit_code = 130
+                error = "cancel requested"
+                state_path = $state.state_path
+                result_path = $state.result_path
+                finished_at = $state.finished_at
+            }
+            Write-JsonFile -Path $state.result_path -Object $result
+            $result | ConvertTo-Json -Depth 20 -Compress
+            exit 130
+        }
         $matches = @(Get-WatchMatches -PathValue $resolved -FilterPattern $FilterPattern -Deep:$Deep)
         $matchCount = $matches.Count
         $signature = Get-WatchSignature -Matches $matches

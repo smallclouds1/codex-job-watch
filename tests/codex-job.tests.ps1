@@ -188,6 +188,32 @@ try {
     Assert-True ($cancelResult.status -eq "cancelled") "cancelled result was not persisted"
     Assert-True ($null -eq (Get-Process -Id $childPid -ErrorAction SilentlyContinue)) "child process survived cancellation"
 
+    $waitPathArgs = @(
+        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $tool,
+        "wait-path", "-Root", $runRoot, "-Name", "regression-cancel-wait-path",
+        "-WatchPath", "never-created.marker", "-IntervalSec", "1", "-TimeoutSec", "60"
+    )
+    $waitPathProcess = Start-Process -FilePath "powershell.exe" -ArgumentList $waitPathArgs -PassThru -WindowStyle Hidden
+    $deadline = (Get-Date).AddSeconds(15)
+    $waitPathJob = $null
+    while ((Get-Date) -lt $deadline) {
+        $waitPathJob = Get-ChildItem -LiteralPath (Join-Path $runRoot "_task\jobs") -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "*-regression-cancel-wait-path*" } |
+            Select-Object -First 1
+        if ($waitPathJob) { break }
+        Start-Sleep -Milliseconds 200
+    }
+    Assert-True ($null -ne $waitPathJob) "wait-path job was not created"
+    $null = Invoke-CodexJobProcess -ToolArgs @(
+        "cancel", "-Root", $runRoot, "-Job", $waitPathJob.FullName
+    )
+    $waitPathProcess.WaitForExit(10000) | Out-Null
+    $waitPathState = Read-TestState -JobDir $waitPathJob.FullName
+    $waitPathResult = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $waitPathJob.FullName "result.json") | ConvertFrom-Json
+    Assert-True ($waitPathState.status -eq "cancelled") "wait-path cancellation state was not persisted"
+    Assert-True ($waitPathResult.status -eq "cancelled") "wait-path cancellation result was not persisted"
+    Assert-True ($null -eq (Get-Process -Id $waitPathProcess.Id -ErrorAction SilentlyContinue)) "wait-path process survived cancellation"
+
     $passed = $true
     [ordered]@{
         status = "passed"
@@ -197,6 +223,7 @@ try {
         parser_failure_job = $parserFailureStart.job_id
         parser_failure_exit_code = [int]$parserFailureResult.exit_code
         cancel_job = $cancelStart.job_id
+        wait_path_cancel_job = $waitPathJob.Name
         ownership_job = $ownershipStart.job_id
         unowned_gate_exit_code = $unownedGateRaw.ExitCode
         state_parse_failures = $parseFailures
