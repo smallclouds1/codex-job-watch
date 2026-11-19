@@ -54,7 +54,7 @@ codex plugin add codex-job-watch@smallclouds1-tools
 現在結束目前回合，任務完成後在這裡傳送一則通知。
 ```
 
-若未指定模式，只要執行時間可能超過 60 秒或無法確定，就預設選擇背景通知。前景等待僅用於預計能在一次不中斷的工具呼叫內完成（通常不超過 60 秒）的命令，或使用者明確指定該模式的情況。長任務只允許傳送一次啟動確認和一次最終完成訊息；工具讓出控制權、狀態未變化、等待了多久都不得口播。
+不論執行時間長短，預設在原對話前景等待。在 Codex Code Mode 中，[前景等待流程](plugins/codex-job-watch/skills/codex-job-watch/SKILL.md#foreground-wait)會在同一次工具呼叫中接續終端機工作階段，等 Job 回傳後才交回模型。啟動呼叫和完成後的回覆仍會使用模型。需要釋放原對話、稍後收到通知時，請明確選擇背景通知。
 
 ## 直接使用 PowerShell runner
 
@@ -124,6 +124,7 @@ Windows worker 與日誌不會因原工具呼叫結束而消失。若完全關�
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\codex-job.tests.ps1
+node --test tests/foreground-call.test.mjs
 ```
 
 測試只使用 `%TEMP%` 下的唯一目錄，不會讀取既有專案的 job。

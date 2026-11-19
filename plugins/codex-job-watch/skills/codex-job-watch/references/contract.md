@@ -27,6 +27,12 @@ Wait exits: `0` succeeded, `1` failed, `124` wait timeout, `130` cancelled. Fina
 
 PowerShell jobs fail closed when the generated command script does not write its authoritative `command.exitcode` file. This covers parser/startup failures that occur before the script trap can run and prevents redirected `Start-Process` from reporting a stale zero as success.
 
+## Foreground completion
+
+The PowerShell wait interval controls local state checks. A yielding shell transport may return a session ID many times. The [Code Mode bridge](../SKILL.md#foreground-wait) consumes these yields inside the initial tool invocation. A normal completion has one assistant tool call, one terminal return and zero intervening model responses. Initial tool selection and handling the result still use the model. A client disconnect, forced tool timeout or user interruption can end the held call while the Windows worker continues.
+
+To check a desktop host, run `Start-Sleep -Seconds 125` as the Job command in foreground mode. In the chat's execution history, compare the initial tool call with its matching return and check for intervening assistant responses. Terminal reads made within the held call are expected.
+
 ## Durability boundary
 
 The Windows worker and its logs survive the originating Codex tool call. In `background-notify`, notification depends on a separate Codex task remaining runnable. A full app shutdown does not stop the OS job, but the waiter may need to be resumed after the app returns.

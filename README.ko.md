@@ -54,7 +54,7 @@ $codex-job-watch를 사용해 이 내보내기를 background-notify 모드로 �
 현재 턴은 종료하고, 작업이 끝나면 이 작업에 메시지 한 건을 보내세요.
 ```
 
-모드를 지정하지 않았고 실행 시간이 60초를 넘을 수 있거나 알 수 없다면 백그라운드 알림을 기본으로 선택합니다. 포그라운드 대기는 한 번의 중단 없는 도구 호출 안에서 끝날 것으로 예상되는 명령(보통 60초 이내)이나 사용자가 명시적으로 요청한 경우에만 사용합니다. 장시간 작업은 시작 확인 한 번과 최종 완료 알림 한 번만 표시하며, 도구 yield, 변경 없는 상태, 경과 시간은 알리지 않습니다.
+실행 시간과 관계없이 기본값은 원래 채팅에서 포그라운드로 기다리는 것입니다. Codex Code Mode의 [포그라운드 대기 절차](plugins/codex-job-watch/skills/codex-job-watch/SKILL.md#foreground-wait)는 한 번의 도구 호출 안에서 터미널 세션을 이어 받아 Job이 끝날 때 모델에 결과를 전달합니다. 작업을 시작하는 호출과 완료 후 응답에는 모델 사용량이 발생합니다. 원래 채팅을 바로 해제하고 나중에 알림을 받으려면 백그라운드 알림을 명시적으로 선택하세요.
 
 ## PowerShell runner 직접 사용
 
@@ -124,6 +124,7 @@ Windows worker와 로그는 원래 도구 호출이 끝난 뒤에도 유지됩�
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\codex-job.tests.ps1
+node --test tests/foreground-call.test.mjs
 ```
 
 테스트는 `%TEMP%` 아래의 고유 디렉터리만 사용하며 기존 프로젝트의 job을 읽지 않습니다.

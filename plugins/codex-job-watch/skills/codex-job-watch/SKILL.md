@@ -1,18 +1,15 @@
 ---
 name: codex-job-watch
-description: Run long-lived Windows commands as durable jobs with logs, cancellation, resumable state, silent foreground waiting, or a one-shot completion message back to the originating Codex task. Use whenever the user says job, Job, 后台任务, 占用会话, 静默等待, 监控, 完成通知, 稍后汇报, or when a command may outlive one tool call. Every running job must either block the current task or have one proven separate waiter task; never final while an unowned job is still running.
+description: Run or monitor a durable Windows Job. By default, keep the current Codex chat in one foreground tool call until the result is ready. Supports logs, cancellation, stable-artifact waits, and explicitly requested background notifications. Use for 后台任务、占用会话、静默等待、监控 or 完成通知.
 ---
 
 # Codex Job Watch
 
 Use the bundled `scripts/codex-job.ps1`. Keep each invocation scoped to the user's current project root or an explicitly chosen root. Never scan or operate on unrelated job roots.
 
-## Non-negotiable ownership invariant
+## Job ownership
 
-Starting a Job is not a handoff. While a Job is non-terminal, the originating Codex task may send `final` only after exactly one of these states is true:
-
-1. **Foreground owner:** the originating task is blocked in the same `run`, `wait`, or `wait-path` tool call until terminal state. It does no other work and sends no waiting updates.
-2. **Background owner:** one separate visible Codex waiter task was successfully created, received the exact `job_dir` and origin task ID, and an immediate task snapshot proved that waiter active. Only then call `arm-waiter` with both task IDs.
+The originating chat owns a running job. For foreground work, keep the same `run`, `wait`, or `wait-path` invocation pending until completion. Before ending the turn early in explicitly requested background-notify mode, establish one visible waiter task and arm it as described below.
 
 Plain `start`, a promised future check, a subagent that is merely running, a heartbeat, an automation, a resumable tool handle, or text saying “notification is armed” does not satisfy ownership. Before any `final` after `start`, the originating task must call `finalization-status -Job <job_dir> -ThreadId <origin-id>`. Exit code `23` means **stop: do not final**. Fall back to one blocking foreground `wait`, or successfully create and arm the waiter. Never invent task IDs or write `waiter.armed.json` manually.
 
@@ -24,21 +21,50 @@ Allow at most one short `wait_agent` attempt when waiting on an in-process subag
 
 ## Choose a mode
 
-- `background-notify` is the default when runtime may exceed 60 seconds or is unknown. Start the job, create one dedicated background Codex task to wait, then return. Do not use heartbeat or recurring automation.
-- `foreground-wait` is only for commands expected to finish inside one uninterrupted tool call, normally within 60 seconds, or when the user explicitly requests this mode. Run the `run` action in one blocking tool call. While it is running, do not narrate, inspect other files, or switch tasks. Return only after terminal state.
+- Default to `foreground-wait` for short, long and unknown durations. Hold the originating chat until the runner returns. On Codex Code Mode use the single-call recipe below.
+- Choose `background-notify` when the user explicitly wants to release the current chat and receive a later completion message. Use the separate-waiter protocol below.
 - Plain `start` is only a primitive. It must immediately transition to `background-notify` and `arm-waiter`, or to a blocking foreground `wait`. It is never by itself a valid reason for the originating task to end.
 
 The only user-visible messages for a long job are one launch acknowledgement and one terminal completion message. Never send elapsed-time or no-result updates such as “still running”, “waiting for several minutes”, “continuing to wait”, or “no response yet”. A tool yield, resumable cell ID, empty output, or unchanged state is not a reportable event.
 
 ## Foreground wait
 
-Run:
+For a new command use `run`. For an existing job use `wait -Job <absolute-job-dir>`. For an artifact use `wait-path`. The runner waits without a deadline by default. Keep the outer tool call pending for the same wait.
+
+**Codex Code Mode** (`functions.exec` with `tools.exec_command` and `tools.write_stdin`). Use this JavaScript as one tool call. Keep the pragma on its **first line**. Fill in the installed runner path, working directory and command. Use a PowerShell shell for the invocation. For an existing Job or artifact, change only the PowerShell invocation to the corresponding action.
+
+```javascript
+// @exec: {"yield_time_ms": 2147483647}
+const runner = "C:/path/to/codex-job.ps1";
+const cwd = "C:/work/example";
+const name = "build";
+const command = "npm run build";
+const ps = value => "'" + value.replace(/['\u2018-\u201b]/g, ch => ch + ch) + "'";
+const cmd = `& ${ps(runner)} run -Root ${ps(cwd)} -Cwd ${ps(cwd)} -Name ${ps(name)} -Command ${ps(command)}\nexit $LASTEXITCODE`;
+
+let part = await tools.exec_command({cmd, workdir: cwd, yield_time_ms: 1000});
+let output = part.output ?? "";
+while (part.exit_code == null) {
+    if (part.session_id == null) {
+        throw new Error("Lost the shell handle. Recover the existing Job before continuing.");
+    }
+    part = await tools.write_stdin({session_id: part.session_id, chars: "", yield_time_ms: 30000});
+    output += part.output ?? "";
+}
+text({exit_code: part.exit_code, output});
+```
+
+The outer pragma requests a long foreground window (about 24.9 days). Shorter shell waits are renewed **inside this JavaScript**. Emit the result once, after the shell exits. A model-issued one-minute `functions.wait` loop would generate another model response on every yield. `-IntervalSec` controls the PowerShell runner's local state checks.
+
+If the host nevertheless returns a Code Mode cell ID, resume that **same cell** with the longest supported `functions.wait` window (on this surface, request `yield_time_ms: 2147483647`). A forced host return can require another model response. Keep the existing Job and cell handles.
+
+**Direct blocking shell.** When the host can keep a shell invocation pending, run the action directly:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File <skill>/scripts/codex-job.ps1 run -Root <project-root> -Cwd <working-directory> -Name <name> -Command <command>
 ```
 
-The tool call itself is the wait. Do not issue commentary while blocked. If the host returns a resumable wait handle before terminal state, resume that handle without commentary; do not turn each yield into a progress update. If repeated yielding is likely, use `background-notify` instead. A successful terminal result exits 0; failed, cancelled, and timed-out waits use nonzero exit codes and emit JSON.
+The terminal JSON carries the Job state and log paths. A successful job exits 0. A failed or cancelled job returns its terminal result with a nonzero tool exit. An explicitly bounded wait can return `wait_timeout` while the worker is still running. Continue using that same Job if completion is still requested. A yield-only host without a blocking bridge can require model-side resumptions. Report that host limitation when zero intermediate responses are required.
 
 ## Background notify
 
@@ -47,7 +73,7 @@ The tool call itself is the wait. Do not issue commentary while blocked. If the 
 3. Create exactly one background Codex task in that project. Do not override the user's model unless requested. Use low reasoning for this mechanical waiter when supported.
 4. Give the waiter the absolute script path, `job_dir`, and originating task ID. Its instructions must be limited to:
    - call `notification-status`; if already notified, archive itself without sending;
-   - call `wait -Job <job_dir>` in one blocking tool call;
+   - call `wait -Job <job_dir>` using the same foreground transport described above;
    - send one concise completion message to the originating task with status, job id, and log/result paths;
    - after a successful send, call `mark-notified -Job <job_dir> -ThreadId <origin-id>`;
    - archive its own task;

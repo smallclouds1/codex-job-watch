@@ -54,7 +54,7 @@ Use $codex-job-watch to run this export in background-notify mode.
 Return this task now and post one message here when the job finishes.
 ```
 
-If you do not specify a mode, Codex defaults to background notify when runtime may exceed 60 seconds or is unknown. Foreground wait is reserved for commands expected to finish inside one uninterrupted tool call, normally within 60 seconds, or when you explicitly request it. Long jobs produce only one launch acknowledgement and one terminal completion message; tool yields and unchanged status are never narrated.
+Foreground waiting is the default for any duration. Codex keeps one tool call open until the Job returns. In Code Mode the [foreground bridge](plugins/codex-job-watch/skills/codex-job-watch/SKILL.md#foreground-wait) consumes shell session handles inside that call. Choose background notification explicitly to release the original chat. The initial request and the response after completion still use the model.
 
 ## Direct PowerShell runner
 
@@ -124,6 +124,7 @@ The Windows worker and its logs survive the originating tool call. If Codex itse
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\codex-job.tests.ps1
+node --test tests/foreground-call.test.mjs
 ```
 
 Tests use a unique directory under `%TEMP%` and never inspect existing project jobs.

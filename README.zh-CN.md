@@ -54,7 +54,7 @@ codex plugin add codex-job-watch@smallclouds1-tools
 现在结束当前回合，任务完成后在这里发一条消息通知我。
 ```
 
-如果没有指定模式，只要运行时间可能超过 60 秒或无法确定，就默认选择后台通知。前台等待仅用于预计能在一次不中断的工具调用内完成（通常不超过 60 秒）的命令，或用户明确指定该模式的情况。长任务只允许发送一次启动确认和一次最终完成消息；工具让出控制权、状态未变化、等待了多久都不得口播。
+长短任务都默认在原会话前台等待。在 Codex Code Mode 中，[前台等待入口](plugins/codex-job-watch/skills/codex-job-watch/SKILL.md#foreground-wait)会在同一次工具调用里接续终端句柄，Job 返回时模型才继续。启动调用和完成后的答复仍有模型用量。需要释放原会话、稍后接收通知时，明确选择后台通知。
 
 ## 直接使用 PowerShell runner
 
@@ -124,6 +124,7 @@ Windows worker 和日志不会因为原工具调用结束而消失。如果完�
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\codex-job.tests.ps1
+node --test tests/foreground-call.test.mjs
 ```
 
 测试只使用 `%TEMP%` 下的唯一目录，不会读取现有项目的 job。

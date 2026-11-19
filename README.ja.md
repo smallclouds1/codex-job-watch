@@ -54,7 +54,7 @@ $codex-job-watch を使用して、このエクスポートを background-notify
 現在のターンは終了し、ジョブ完了後にこのタスクへ 1 件のメッセージを送ってください。
 ```
 
-モードを指定しない場合、実行時間が 60 秒を超える可能性がある、または不明なら、バックグラウンド通知を既定で選択します。フォアグラウンド待機は、1 回の中断されないツール呼び出し内（通常 60 秒以内）で完了する見込みのコマンド、またはユーザーが明示的に指定した場合に限ります。長時間ジョブで表示するのは開始確認 1 回と最終完了通知 1 回だけで、ツールの yield、状態の不変、待機時間は報告しません。
+実行時間にかかわらず、既定は元のチャットでのフォアグラウンド待機です。Codex Code Mode では[フォアグラウンド待機の手順](plugins/codex-job-watch/skills/codex-job-watch/SKILL.md#foreground-wait)に従い、1 回のツール呼び出しの中で端末セッションを待ち続けます。Job の結果が返るとモデルが処理を再開します。開始時の呼び出しと終了後の応答にはモデルを使用します。元のチャットを解放して後で通知を受け取りたい場合は、バックグラウンド通知を指定してください。
 
 ## PowerShell runner を直接使う
 
@@ -124,6 +124,7 @@ Windows worker とログは、元のツール呼び出しが終わっても残�
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\codex-job.tests.ps1
+node --test tests/foreground-call.test.mjs
 ```
 
 テストは `%TEMP%` 内の固有ディレクトリのみを使用し、既存プロジェクトの job を読みません。

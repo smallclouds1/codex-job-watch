@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.4 - 2026-11-19
+
+- Keep foreground Jobs in their originating chat by default, including long jobs and jobs of unknown duration. Detached notification remains an explicit choice.
+- In Codex Code Mode, hold one outer tool call and collect shell yields inside it. The model receives the terminal output and exit code.
+
 ## 0.1.3 - 2026-08-14
 
 - Default unknown or longer-than-60-second commands to background notification instead of foreground waiting.
