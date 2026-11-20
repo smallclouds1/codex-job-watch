@@ -288,7 +288,6 @@ function New-CodexJob {
         $jobDir = Join-Path (Get-JobsRoot -ProjectRoot $projectRoot) ("$jobId-$suffix")
     }
     New-Item -ItemType Directory -Force -Path $jobDir | Out-Null
-    $commandExitCodeFile = Join-Path $jobDir "command.exitcode"
 
     $commandFile = if ($CommandShell -eq "cmd") {
         Join-Path $jobDir "command.cmd"
@@ -297,27 +296,9 @@ function New-CodexJob {
     }
 
     if ($CommandShell -eq "cmd") {
-        $cmd = "@echo off`r`ncd /d `"$workingDirectory`"`r`n$JobCommand`r`nset `"_CODEX_JOB_EXIT=%ERRORLEVEL%`"`r`n> `"$commandExitCodeFile`" echo %_CODEX_JOB_EXIT%`r`nexit /b %_CODEX_JOB_EXIT%`r`n"
-        Write-CmdScriptFile -Path $commandFile -Text $cmd
+        Write-CmdScriptFile -Path $commandFile -Text ("@echo off`r`n" + $JobCommand + "`r`nexit /b %ERRORLEVEL%`r`n")
     } else {
-        $ps = @"
-trap {
-    Write-Error `$_
-    [System.IO.File]::WriteAllText($(Quote-PowerShellLiteral -Value $commandExitCodeFile), "1")
-    exit 1
-}
-`$ErrorActionPreference = "Stop"
-Set-Location -LiteralPath $(Quote-PowerShellLiteral -Value $workingDirectory)
-$JobCommand
-# Start-Process without -Wait can report a stale zero ExitCode on Windows when
-# stdout/stderr are redirected. Persist the command's own code before exiting;
-# the worker treats this file as authoritative.
-`$__codexJobExitCode = 0
-if (`$LASTEXITCODE -ne `$null) { `$__codexJobExitCode = [int]`$LASTEXITCODE }
-[System.IO.File]::WriteAllText($(Quote-PowerShellLiteral -Value $commandExitCodeFile), [string]`$__codexJobExitCode)
-exit `$__codexJobExitCode
-"@
-        Write-PowerShellScriptFile -Path $commandFile -Text $ps
+        Write-PowerShellScriptFile -Path $commandFile -Text $JobCommand
     }
 
     $state = [ordered]@{
@@ -396,13 +377,25 @@ function Start-Worker {
         if (Test-Path -LiteralPath $stdout) { Remove-Item -LiteralPath $stdout -Force }
         if (Test-Path -LiteralPath $stderr) { Remove-Item -LiteralPath $stderr -Force }
 
-        if ($state.shell -eq "cmd") {
-            $exe = "cmd.exe"
-            $args = "/d /c `"$($state.command_file)`""
-        } else {
-            $exe = "powershell.exe"
-            $args = "-NoProfile -ExecutionPolicy Bypass -File `"$($state.command_file)`""
-        }
+        $supervisor = Join-Path $JobDir "invoke.ps1"
+        $commandExitCodeFile = Join-Path $JobDir "command.exitcode"
+        $invoke = @"
+`$ErrorActionPreference = "Stop"
+try {
+    Set-Location -LiteralPath $(Quote-PowerShellLiteral -Value $state.cwd)
+    `$global:LASTEXITCODE = 0
+    & $(Quote-PowerShellLiteral -Value $state.command_file)
+    `$resultCode = [int]`$LASTEXITCODE
+} catch {
+    [Console]::Error.WriteLine(`$_.ToString())
+    `$resultCode = 1
+}
+[System.IO.File]::WriteAllText($(Quote-PowerShellLiteral -Value $commandExitCodeFile), [string]`$resultCode)
+exit `$resultCode
+"@
+        Write-PowerShellScriptFile -Path $supervisor -Text $invoke
+        $exe = "powershell.exe"
+        $args = "-NoProfile -ExecutionPolicy Bypass -File `"$supervisor`""
 
         Set-ObjectProperty -Object $state -Name "step" -Value "child_waiting"
         Save-State -JobDir $JobDir -State $state
@@ -426,8 +419,6 @@ function Start-Worker {
             $child.WaitForExit(5000) | Out-Null
         }
         $child.Refresh()
-        $exitCode = [int]$child.ExitCode
-        $commandExitCodeFile = Join-Path $JobDir "command.exitcode"
         $commandExitCodeMissing = $false
         if (Test-Path -LiteralPath $commandExitCodeFile -PathType Leaf) {
             $commandExitCodeText = (Get-Content -Raw -Encoding UTF8 -LiteralPath $commandExitCodeFile).Trim()
@@ -438,10 +429,7 @@ function Start-Worker {
                 throw "Command exit-code file is invalid: $commandExitCodeFile"
             }
         } else {
-            # A PowerShell parser error happens before the generated script's trap
-            # can run. Start-Process may still expose a stale zero ExitCode when
-            # streams are redirected, so absence of the authoritative file must
-            # fail closed instead of producing a false success.
+            # A missing supervisor record means the command's exit status is unknown.
             $commandExitCodeMissing = $true
             $exitCode = 1
         }
@@ -456,7 +444,7 @@ function Start-Worker {
             Set-ObjectProperty -Object $state -Name "exit_code" -Value 130
             Set-ObjectProperty -Object $state -Name "error" -Value "cancel requested"
         } elseif ($commandExitCodeMissing) {
-            Set-ObjectProperty -Object $state -Name "error" -Value "command did not write its authoritative exit-code file; inspect worker logs for a parser or startup failure"
+            Set-ObjectProperty -Object $state -Name "error" -Value "supervisor did not record the command exit code; inspect worker logs"
         } elseif ($exitCode -ne 0) {
             Set-ObjectProperty -Object $state -Name "error" -Value "command exited with code $exitCode"
         }

@@ -25,7 +25,7 @@ Each run lives under `<root>/_task/jobs/<timestamp-name>/`. Important files:
 
 Wait exits: `0` succeeded, `1` failed, `124` wait timeout, `130` cancelled. Finalization gate exit `23` means the originating task must not send `final` because the Job is still running without a registered waiter owner.
 
-PowerShell jobs fail closed when the generated command script does not write its authoritative `command.exitcode` file. This covers parser/startup failures that occur before the script trap can run and prevents redirected `Start-Process` from reporting a stale zero as success.
+The supervisor calls the saved command in its own script scope and persists the observed exit code in `command.exitcode`. Explicit exits, native command exit codes and parser failures reach the same reporting path. A missing supervisor record fails the Job.
 
 ## Foreground completion
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.5 - 2026-11-20
+
+- Record the command exit code in the supervisor after the saved script returns. PowerShell `exit 0`, nonzero exits, parser failures and early exits in batch files now preserve the real outcome.
+
 ## 0.1.4 - 2026-11-19
 
 - Keep foreground Jobs in their originating chat by default, including long jobs and jobs of unknown duration. Detached notification remains an explicit choice.

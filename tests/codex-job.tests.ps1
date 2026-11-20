@@ -141,8 +141,23 @@ try {
     $parserFailureResult = $parserFailureWaitRaw.Text | ConvertFrom-Json
     Assert-True ($parserFailureResult.status -eq "failed") "PowerShell parser failure was reported as succeeded"
     Assert-True ([int]$parserFailureResult.exit_code -eq 1) "PowerShell parser failure did not fail closed"
-    Assert-True ($parserFailureResult.error -like "command did not write its authoritative exit-code file*") "PowerShell parser failure did not expose the missing exit-code error"
-    Assert-True (!(Test-Path -LiteralPath (Join-Path $parserFailureStart.job_dir "command.exitcode"))) "parser failure unexpectedly wrote command.exitcode"
+    $parseExit = Get-Content -Raw -LiteralPath (Join-Path $parserFailureStart.job_dir "command.exitcode")
+    Assert-True ([int]$parseExit -eq 1) "supervisor did not record the parser failure"
+
+    foreach ($case in @(
+        @{ shell = "powershell"; command = "Write-Output 'ready'; exit 0"; expected = 0 },
+        @{ shell = "powershell"; command = "exit 7"; expected = 7 },
+        @{ shell = "cmd"; command = "exit /b 9"; expected = 9 }
+    )) {
+        $waitExit = if ($case.expected -eq 0) { 0 } else { 1 }
+        $terminal = Invoke-CodexJobProcess -ToolArgs @(
+            "run", "-Root", $runRoot, "-Name", "explicit-exit", "-IntervalSec", "1",
+            "-Shell", $case.shell, "-Command", $case.command
+        ) -ExpectedExitCodes @($waitExit)
+        $observed = $terminal.Text | ConvertFrom-Json
+        Assert-True ([int]$observed.exit_code -eq $case.expected) "wrong explicit command exit code"
+    }
+
 
     $notificationStatusRaw = Invoke-CodexJobProcess -ToolArgs @(
         "notification-status", "-Root", $runRoot, "-Job", $successStart.job_dir
